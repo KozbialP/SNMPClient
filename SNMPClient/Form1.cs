@@ -11,14 +11,17 @@ using SnmpSharpNet;
 using System.Net;
 using System.IO;
 using System.Timers;
+using System.Net.Sockets;
 
 namespace SNMPClient
 {
     public partial class Form1 : Form
     {
+        Trap trap;
         Request request;
         public Form1()
         {
+            Trap trap = null;
             request = new Request();
             InitializeComponent();
         }
@@ -205,10 +208,7 @@ namespace SNMPClient
             System.Timers.Timer aTimer = new System.Timers.Timer();
             aTimer.Elapsed += new ElapsedEventHandler(Monitor);
             aTimer.Interval = 5000;
-            if (aTimer.Enabled)
-                aTimer.Stop();
-            else
-                aTimer.Start();
+            aTimer.Enabled = !aTimer.Enabled;
         }
         private void Monitor(object source, ElapsedEventArgs e)
         {
@@ -224,6 +224,21 @@ namespace SNMPClient
                 row.CreateCells(dataGridView1, res.Pdu.VbList[0].Oid.ToString(), res.Pdu.VbList[0].Value.ToString(), SnmpConstants.GetTypeName(res.Pdu.VbList[0].Value.Type), "localhost");
                 dataGridView1.Rows.Add(row);
             }
+        }
+
+        private void button6_Click(object sender, EventArgs e)
+        {
+            trap = new Trap(this);
+        }
+
+        private void dataGridView2_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+
+        }
+
+        private void button7_Click(object sender, EventArgs e)
+        {
+            trap = null;
         }
     }
 }
