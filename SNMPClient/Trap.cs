@@ -1,12 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Net;
-using System.Net.Sockets;
-using SnmpSharpNet;
 using System.Windows.Forms;
+using SnmpSharpNet;
+using System.Net;
+using System.IO;
+using System.Timers;
+using System.Net.Sockets;
 
 namespace SNMPClient
 {
@@ -17,7 +22,7 @@ namespace SNMPClient
             ColdStart, WarmStart, LinkDown, LinkUp, AuthenticationFailure, EGPNeithbourLoss, Other
         };
         Form1 form;
-        Socket mySocket;
+        public Socket mySocket;
         IPEndPoint myIpEndPoint;
         IPEndPoint trapSenderIPEndPoint;
         EndPoint trapSenderEndPoint;
@@ -30,6 +35,10 @@ namespace SNMPClient
             trapSenderPort = 163;
             this.form = form;
             InitializeSocket();
+        }
+        public Trap(bool flag)
+        {
+
         }
         private void InitializeSocket()
         {
@@ -54,6 +63,7 @@ namespace SNMPClient
             {
             }
             buffer = new byte[16*1024];
+            if (this != null) 
             mySocket.BeginReceiveFrom(buffer, 0, buffer.Length, SocketFlags.None, ref trapSenderEndPoint, new AsyncCallback(ReceivedPacket), null);
         }
         public void ReceivedPacket(IAsyncResult res)
@@ -65,6 +75,7 @@ namespace SNMPClient
             }
             catch
             {
+                if(this!=null)
                 mySocket.BeginReceiveFrom(buffer, 0, buffer.Length, SocketFlags.None, ref trapSenderEndPoint, new AsyncCallback(ReceivedPacket), null);
                 return;
             }
@@ -75,6 +86,7 @@ namespace SNMPClient
             buffer = new byte[16 * 1024];
             mySocket.BeginReceiveFrom(buffer, 0, buffer.Length, SocketFlags.None, ref trapSenderEndPoint, new AsyncCallback(ReceivedPacket), null);
         }
+        delegate void DataCallback(byte[] data, int size);
         public void ProcessReceivedData(byte[] data, int size)
         {
             int ver = SnmpPacket.GetProtocolVersion(data, size);
@@ -86,8 +98,20 @@ namespace SNMPClient
                 int value = pkt.Pdu.Generic;
                 Generic enumDisplayStatus = (Generic)value;
                 string stringValue = enumDisplayStatus.ToString();
+                if(stringValue=="Other")
+                {
+                    stringValue = "Specific: " +  pkt.Pdu.Specific.ToString() + "; " + pkt.Pdu.Enterprise.ToString();
+                }
                 row.CreateCells(form.TrapDataGrid, stringValue, pkt.Pdu.AgentAddress.ToString(), DateTime.Now.ToString());
-                form.TrapDataGrid.Rows.Add(row);
+                if (form.TrapDataGrid.InvokeRequired)
+                {
+                    DataCallback d = new DataCallback(ProcessReceivedData);
+                    form.Invoke(d, new object[] { data, size });
+                }
+                else
+                {
+                    form.TrapDataGrid.Rows.Add(row);
+                }
             }
             else
             {

@@ -19,9 +19,10 @@ namespace SNMPClient
     {
         Trap trap;
         Request request;
+        System.Timers.Timer aTimer;
         public Form1()
         {
-            Trap trap = null;
+            trap = null;
             request = new Request();
             InitializeComponent();
         }
@@ -79,98 +80,84 @@ namespace SNMPClient
         private void button3_Click(object sender, EventArgs e)
         {
             string fileLogPath = textBox3.Text + ".txt";
-            Dictionary<String, Dictionary<uint, AsnType>> result = new Dictionary<String, Dictionary<uint, AsnType>>();
-            // Not every row has a value for every column so keep track of all columns available in the table
-            List<uint> tableColumns = new List<uint>();
             List<Oid> columns = new List<Oid>();
+            SnmpV1Packet[][] results = new SnmpV1Packet[100][];
             OctetString community = new OctetString("public");
             IpAddress peer = new IpAddress("localhost");
             AgentParameters param = new AgentParameters(community);
             UdpTarget target = new UdpTarget((IPAddress)peer);
             Oid startOid = new Oid(textBox1.Text);
-            startOid.Add(1);
-            Pdu pdu = new  Pdu(PduType.GetNext);
+            Pdu pdu = new Pdu(PduType.GetNext);
             pdu.VbList.Add(startOid);
+            uint rows = 0;
+            uint nOColumns = 0;
+            startOid.Add(1);
             Oid curOid = (Oid)startOid.Clone();
             while (startOid.IsRootOf(curOid))
             {
+                int o = startOid.Count();
                 SnmpV1Packet res;
-                try
-                {
-                    res = (SnmpV1Packet)target.Request(pdu, param);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("Request failed: {0}", ex.Message);
-                    target.Close();
-                    return;
-                }
-                foreach (Vb v in res.Pdu.VbList)
-                {
-                    curOid = (Oid)v.Oid.Clone();
-                    if (startOid.IsRootOf(v.Oid))
+                    try
                     {
-                        // Get child Id's from the OID (past the table.entry sequence)
-                        uint[] childOids = Oid.GetChildIdentifiers(startOid, v.Oid);
-                        // Get the value instance and converted it to a dotted decimal
-                        //  string to use as key in result dictionary
-                        uint[] instance = new uint[childOids.Length - 1];
-                        Array.Copy(childOids, 1, instance, 0, childOids.Length - 1);
-                        String strInst = InstanceToString(instance);
-                        // Column id is the first value past <table oid>.entry in the response OID
-                        uint column = childOids[0];
-                        Oid leaf = (Oid)startOid.Clone();
-                        leaf.Add(column);
-                        if (!tableColumns.Contains(column))
-                            tableColumns.Add(column);
-                        if(!columns.Contains(leaf))
-                            columns.Add(leaf);
-                        if (result.ContainsKey(strInst))
-                        {
-                            result[strInst][column] = (AsnType)v.Value.Clone();
-                        }
-                        else
-                        {
-                            result[strInst] = new Dictionary<uint, AsnType>();
-                            result[strInst][column] = (AsnType)v.Value.Clone();
-                        }
+                        res = request.GetNext(startOid.ToString(), curOid.ToString());
                     }
-                }
-                if (startOid.IsRootOf(curOid))
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Request failed: {0}", ex.Message);
+                        target.Close();
+                        return;
+                    }
+                if (res == null)
                 {
-                    pdu.VbList.Clear();
-                    pdu.VbList.Add(curOid);
+                    break;
                 }
-            }
-            if (result.Count <= 0)
-            {
-                MessageBox.Show("No results returned.\n");
-            }
-            else
-            {
-                StringBuilder header = new StringBuilder();
-                header.Append("Instance");
-                foreach (Oid column in columns)
+                    if (startOid.IsRootOf(curOid))
+                    {
+                        curOid = (Oid)res.Pdu.VbList[0].Oid.Clone();
+                    }
+                StringBuilder s = new StringBuilder();
+                string[] abcd = curOid.ToString().Split('.');
+                for (int j = 0; j <= o; j++)
                 {
-                    header.Append("\t" + column.ToString());
+                    s.Append('.');
+                    s.Append(abcd[j]);
                 }
-                MakeLog(header.ToString(), fileLogPath);
-                foreach (KeyValuePair<string, Dictionary<uint, AsnType>> kvp in result)
+                Oid c = new Oid(s.ToString());
+                if (!columns.Contains(c))
+                {
+                    columns.Add(c);
+                    nOColumns++;
+                    results[nOColumns] = new SnmpV1Packet[100];
+                    rows = 0;
+                }
+                else
+                {
+                    rows++;
+                }
+                results[nOColumns][rows] = res;
+            }
+          if (results[1][0] == null)
+          {
+              MessageBox.Show("No results returned.\n");
+          }
+          else
+          {
+              StringBuilder header = new StringBuilder();
+              foreach (Oid column in columns)
+              {
+                  header.Append(column.ToString() + " \t ");
+              }
+              MakeLog(header.ToString(), fileLogPath);
+                for (int n = 0; n <= rows; n++)
                 {
                     StringBuilder s = new StringBuilder();
-                    s.Append(kvp.Key);
-                    foreach (uint column in tableColumns)
+                    for (int m = 1; m <= nOColumns; m++)
                     {
-                        if (kvp.Value.ContainsKey(column))
+                        if (results[m][n] != null)
                         {
-                            s.Append(" \t ");
-                            s.Append(kvp.Value[column].ToString());
+                            s.Append(results[m][n].Pdu.VbList[0].Value.ToString());
                             s.Append(" ");
-                            s.Append("(" + SnmpConstants.GetTypeName(kvp.Value[column].Type) + ")");
-                        }
-                        else
-                        {
-                            s.Append("\t-");
+                            s.Append("(" + SnmpConstants.GetTypeName(results[m][n].Pdu.VbList[0].Value.Type) + ")\t");
                         }
                     }
                     MakeLog(s.ToString(), fileLogPath);
@@ -182,18 +169,6 @@ namespace SNMPClient
         {
             dataGridView1.Rows.Clear();
         }
-        public static string InstanceToString(uint[] instance)
-        {
-            StringBuilder str = new StringBuilder();
-            foreach (uint v in instance)
-            {
-                if (str.Length == 0)
-                    str.Append(v);
-                else
-                    str.AppendFormat(".{0}", v);
-            }
-            return str.ToString();
-        }
         public static void MakeLog(string logDescription, string fileLogPath)
         {
             using (StreamWriter file = new StreamWriter(fileLogPath, true))
@@ -204,12 +179,20 @@ namespace SNMPClient
 
         private void button5_Click(object sender, EventArgs e)
         {
-            
-            System.Timers.Timer aTimer = new System.Timers.Timer();
-            aTimer.Elapsed += new ElapsedEventHandler(Monitor);
-            aTimer.Interval = 5000;
-            aTimer.Enabled = !aTimer.Enabled;
+            if (aTimer == null)
+            {
+                aTimer = new System.Timers.Timer();
+                aTimer.Elapsed += new ElapsedEventHandler(Monitor);
+                aTimer.Interval = 5000;
+                aTimer.Enabled = !aTimer.Enabled;
+            }
+            else
+            {
+                aTimer.Stop();
+                aTimer = null;
+            }
         }
+        delegate void MonitorCallback(object source, ElapsedEventArgs e);
         private void Monitor(object source, ElapsedEventArgs e)
         {
             string oid = textBox1.Text;
@@ -222,13 +205,21 @@ namespace SNMPClient
             {
                 DataGridViewRow row = (DataGridViewRow)dataGridView1.RowTemplate.Clone();
                 row.CreateCells(dataGridView1, res.Pdu.VbList[0].Oid.ToString(), res.Pdu.VbList[0].Value.ToString(), SnmpConstants.GetTypeName(res.Pdu.VbList[0].Value.Type), "localhost");
-                dataGridView1.Rows.Add(row);
+                if (this.dataGridView1.InvokeRequired)
+                {
+                    MonitorCallback d = new MonitorCallback(Monitor);
+                    this.Invoke(d, new object[] { source, e });
+                }
+                else
+                {
+                    this.dataGridView1.Rows.Add(row);
+                }
             }
         }
 
         private void button6_Click(object sender, EventArgs e)
         {
-            trap = new Trap(this);
+                trap = new Trap(this);
         }
 
         private void dataGridView2_CellContentClick(object sender, DataGridViewCellEventArgs e)
